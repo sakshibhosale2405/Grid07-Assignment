@@ -1,13 +1,8 @@
-"""
-Phase 1: Vector-Based Persona Matching (The Router)
-Uses ChromaDB + sentence-transformers to match posts to bot personas via cosine similarity.
-"""
-
 import chromadb
 from chromadb.utils import embedding_functions
 import numpy as np
 
-# ── Bot personas ──────────────────────────────────────────────────────────────
+# bot personas for the router phase
 BOT_PERSONAS = {
     "bot_a": (
         "I believe AI and crypto will solve all human problems. "
@@ -25,60 +20,54 @@ BOT_PERSONAS = {
     ),
 }
 
-# ── Setup ChromaDB with sentence-transformers embeddings ──────────────────────
+# setting up chromadb with sentence-transformers 
 embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name="all-MiniLM-L6-v2"   # small, fast, free — no API key needed
+    model_name="all-MiniLM-L6-v2" # using this because it's fast and no api key needed
 )
 
-client = chromadb.Client()  # in-memory
+client = chromadb.Client() # memory only
 collection = client.get_or_create_collection(
     name="bot_personas",
     embedding_function=embedding_fn,
-    metadata={"hnsw:space": "cosine"},   # use cosine distance
+    metadata={"hnsw:space": "cosine"}, # cosine distance
 )
 
-# Store all personas in the vector DB
+# put all personas in the db
 collection.add(
     ids=list(BOT_PERSONAS.keys()),
     documents=list(BOT_PERSONAS.values()),
 )
-print("✅ Bot personas stored in ChromaDB\n")
+print("bot personas stored in chromadb\n")
 
 
 def route_post_to_bots(post_content: str, threshold: float = 0.40) -> list[dict]:
-    """
-    Embed the incoming post and return bots whose persona vector
-    has cosine similarity > threshold with the post.
-
-    Note: ChromaDB returns *distance* (0 = identical, 1 = opposite),
-    so similarity = 1 - distance.
-    The default threshold of 0.40 works well with all-MiniLM-L6-v2.
-    """
+    # embed the post and return bots that cross the threshold
+    # chromadb returns distance so similarity is 1 - distance
     results = collection.query(
         query_texts=[post_content],
-        n_results=len(BOT_PERSONAS),   # check all bots
+        n_results=len(BOT_PERSONAS),
         include=["distances", "documents"],
     )
 
     matched_bots = []
-    print(f"📨 Post: \"{post_content}\"\n")
-    print("📊 Similarity Scores:")
+    print(f"post: \"{post_content}\"\n")
+    print("similarity scores:")
 
     for bot_id, distance in zip(results["ids"][0], results["distances"][0]):
-        similarity = 1 - distance   # convert distance → similarity
+        similarity = 1 - distance
         print(f"   {bot_id}: {similarity:.4f}", end="")
 
         if similarity >= threshold:
-            print(f"  ✅ MATCHED (≥ {threshold})")
+            print(f"  matched (>={threshold})")
             matched_bots.append({"bot_id": bot_id, "similarity": round(similarity, 4)})
         else:
-            print(f"  ❌ skipped (< {threshold})")
+            print(f"  skipped (<{threshold})")
 
-    print(f"\n🎯 Routed to: {[b['bot_id'] for b in matched_bots] or 'No bots matched'}\n")
+    assigned = [b['bot_id'] for b in matched_bots] or 'none'
+    print(f"\nrouted to: {assigned}\n")
     return matched_bots
 
 
-# ── Quick demo ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     test_posts = [
         "OpenAI just released a new model that might replace junior developers.",
@@ -89,4 +78,4 @@ if __name__ == "__main__":
 
     for post in test_posts:
         route_post_to_bots(post)
-        print("-" * 60)
+        print("-" * 50)

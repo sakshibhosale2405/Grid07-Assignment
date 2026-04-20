@@ -1,13 +1,6 @@
-"""
-Phase 2: Autonomous Content Engine using LangGraph
-3-node graph: Decide Search → Web Search → Draft Post
-Output is a strict JSON object: {"bot_id", "topic", "post_content"}
-"""
-
 import json
 import os
 from typing import TypedDict
-
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 from langchain_groq import ChatGroq
@@ -15,14 +8,14 @@ from langgraph.graph import END, StateGraph
 
 load_dotenv()
 
-# ── LLM Setup (Groq — free & fast) ───────────────────────────────────────────
+# groq llm
 llm = ChatGroq(
     model="llama3-8b-8192",
     temperature=0.8,
     api_key=os.getenv("GROQ_API_KEY"),
 )
 
-# ── Bot Personas ──────────────────────────────────────────────────────────────
+# bot personalities
 BOT_PERSONAS = {
     "bot_a": (
         "You are Bot A, a Tech Maximalist. You believe AI and crypto will solve all "
@@ -41,13 +34,10 @@ BOT_PERSONAS = {
     ),
 }
 
-# ── Mock Search Tool ──────────────────────────────────────────────────────────
+
 @tool
 def mock_searxng_search(query: str) -> str:
-    """
-    Simulates a web search by returning hardcoded recent headlines
-    based on keywords in the query.
-    """
+    # fake search to return some headlines
     query_lower = query.lower()
 
     if "crypto" in query_lower or "bitcoin" in query_lower:
@@ -87,23 +77,17 @@ def mock_searxng_search(query: str) -> str:
             "Renewable energy surpasses fossil fuels in global electricity generation."
         )
 
-
-# ── LangGraph State ───────────────────────────────────────────────────────────
+# state for the graph
 class PostState(TypedDict):
     bot_id: str
     persona: str
     search_query: str
     search_results: str
-    final_post: dict  # {"bot_id": ..., "topic": ..., "post_content": ...}
+    final_post: dict 
 
-
-# ── Node 1: Decide Search ─────────────────────────────────────────────────────
+# node 1
 def decide_search_node(state: PostState) -> PostState:
-    """
-    The LLM reads the bot's persona and decides what topic to post about today,
-    then formats a search query.
-    """
-    print(f"\n🧠 [Node 1] Deciding search topic for {state['bot_id']}...")
+    print(f"\n[node 1] deciding topic for {state['bot_id']}...")
 
     prompt = f"""
 You are {state['bot_id']} with the following persona:
@@ -117,43 +101,32 @@ Respond ONLY in this exact JSON format:
 """
 
     response = llm.invoke(prompt)
-    # Strip markdown code fences if present
     raw = response.content.strip().replace("```json", "").replace("```", "").strip()
 
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
-        # fallback if LLM adds extra text
         import re
         match = re.search(r'\{.*?\}', raw, re.DOTALL)
         parsed = json.loads(match.group()) if match else {"topic": "technology", "search_query": "AI news"}
 
-    print(f"   📌 Topic: {parsed['topic']}")
-    print(f"   🔍 Search Query: {parsed['search_query']}")
+    print(f"   topic: {parsed['topic']}")
+    print(f"   query: {parsed['search_query']}")
 
     state["search_query"] = parsed["search_query"]
     return state
 
-
-# ── Node 2: Web Search ────────────────────────────────────────────────────────
+# node 2
 def web_search_node(state: PostState) -> PostState:
-    """
-    Runs the mock search tool with the query from Node 1.
-    """
-    print(f"\n🔎 [Node 2] Searching for: \"{state['search_query']}\"...")
+    print(f"\n[node 2] searching: \"{state['search_query']}\"...")
     results = mock_searxng_search.invoke({"query": state["search_query"]})
     state["search_results"] = results
-    print(f"   📰 Results: {results[:120]}...")
+    print(f"   results: {results[:100]}...")
     return state
 
-
-# ── Node 3: Draft Post ────────────────────────────────────────────────────────
+# node 3
 def draft_post_node(state: PostState) -> PostState:
-    """
-    The LLM uses persona + search results to generate a 280-char opinionated post.
-    Output is a strict JSON object.
-    """
-    print(f"\n✍️  [Node 3] Drafting post for {state['bot_id']}...")
+    print(f"\n[node 3] drafting post for {state['bot_id']}...")
 
     prompt = f"""
 You are {state['bot_id']} with this persona:
@@ -182,18 +155,15 @@ Respond ONLY in this exact JSON format with NO other text:
             "post_content": raw[:280],
         }
 
-    # Enforce 280-char limit
     parsed["post_content"] = parsed["post_content"][:280]
 
-    print(f"\n   ✅ Final JSON Post:\n   {json.dumps(parsed, indent=2)}")
+    print(f"\n   final post: {json.dumps(parsed)}")
     state["final_post"] = parsed
     return state
 
 
-# ── Build the LangGraph ───────────────────────────────────────────────────────
 def build_graph():
     graph = StateGraph(PostState)
-
     graph.add_node("decide_search", decide_search_node)
     graph.add_node("web_search", web_search_node)
     graph.add_node("draft_post", draft_post_node)
@@ -207,9 +177,7 @@ def build_graph():
 
 
 def run_content_engine(bot_id: str) -> dict:
-    """Run the full LangGraph pipeline for a given bot."""
     app = build_graph()
-
     initial_state: PostState = {
         "bot_id": bot_id,
         "persona": BOT_PERSONAS[bot_id],
@@ -217,20 +185,16 @@ def run_content_engine(bot_id: str) -> dict:
         "search_results": "",
         "final_post": {},
     }
-
     result = app.invoke(initial_state)
     return result["final_post"]
 
 
-# ── Demo ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    print("=" * 60)
-    print("🤖 PHASE 2: Autonomous Content Engine")
-    print("=" * 60)
+    print("-" * 40)
+    print("running langgraph pipeline")
+    print("-" * 40)
 
     for bot_id in ["bot_a", "bot_b", "bot_c"]:
-        print(f"\n{'='*60}")
-        print(f"Running pipeline for {bot_id.upper()}")
-        print("=" * 60)
+        print(f"\nrunning for {bot_id}")
         post = run_content_engine(bot_id)
-        print(f"\n🎉 OUTPUT: {json.dumps(post, indent=2)}")
+        print(f"\noutput: {json.dumps(post, indent=2)}")
